@@ -224,12 +224,233 @@ export function createApp() {
       attention: [{ label: "2 invoices are overdue", tone: "danger" }, { label: "1 subscription is paused", tone: "warning" }, { label: "Billing run ready for 4 November", tone: "info" }]
     });
   });
-  app.get("/api/invoices", (_req, res) => res.json(invoices));
-  app.get("/api/reports", (_req, res) => {
-    const mrr = subscriptions.filter((s) => s.status === "ACTIVE").reduce((sum, s) => sum + monthlyRecurringRevenue(s.amount, s.interval), 0);
-    res.json({ mrr, arr: mrr * 12, movements: { opening: 5480000, newBusiness: 820000, expansion: 310000, contraction: 90000, reactivation: 0, churn: 180000, closing: 6340000 }, aging: [{ bucket: "0–30 days", amount: 1762820 }, { bucket: "31–60 days", amount: 825882 }, { bucket: "60+ days", amount: 0 }] });
+  app.get("/api/invoices", authenticate, async (req, res, next) => {
+    try {
+      const pool = getPool();
+      if (!pool) return res.json(invoices);
+      const isCustomer = req.user?.role === "CUSTOMER";
+      const result = await pool.query(
+        `SELECT i.id, i.invoice_number AS number, c.legal_name AS customer,
+                i.due_on AS "dueDate", i.total_paise AS total, i.status,
+                COALESCE(SUM(pa.amount_paise), 0) AS "paidPaise"
+         FROM invoices i JOIN customers c ON c.id = i.customer_id
+         LEFT JOIN payment_allocations pa ON pa.invoice_id = i.id
+         ${isCustomer ? "WHERE c.user_id = $1" : ""}
+         GROUP BY i.id, c.legal_name ORDER BY i.due_on DESC`,
+        isCustomer ? [req.user?.id] : []
+      );
+      return res.json(result.rows);
+    } catch (error) {
+      return next(error);
+    }
   });
-  app.post("/api/billing/preview", (_req, res) => {
+  app.post("/api/billing/preview", authenticate, requireRole("ADMIN", "STAFF"), async (req, res, next) => {
+    try {
+      const body = z.object({ billingDate: z.string().date() }).strict().parse(req.body);
+      const pool = getPool();
+      if (!pool) return res.status(503).json({ error: "Database is not configured" });
+      const result = await pool.query(
+        `SELECT s.id, s.subscription_number AS subscription, c.legal_name AS customer,
+                p.amount_paise AS "subtotalPaise", p.interval,
+                CASE WHEN s.status = 'ACTIVE' AND s.next_billing_on <= $1 THEN 'DUE'
+                     WHEN s.status <> 'ACTIVE' THEN 'SKIPPED'
+                     ELSE 'NOT_DUE' END AS outcome,
+                CASE WHEN s.status <> 'ACTIVE' THEN 'Subscription is ' || lower(s.status::text) END AS reason
+         FROM subscriptions s JOIN customers c ON c.id = s.customer_id
+         JOIN plans p ON p.id = s.plan_id
+         WHERE s.next_billing_on <= $1 OR s.status <> 'ACTIVE'
+         ORDER BY s.next_billing_on`,
+        [body.billingDate]
+      );
+      return res.json({ billingDate: body.billingDate, items: result.rows });
+    } catch (error) {
+      return next(error);
+    }
+  });
+  app.post("/api/billing/run", authenticate, requireRole("ADMIN", "STAFF"), async (req, res, next) => {
+    const body = z.object({ billingDate: z.string().date() }).strict().safeParse(req.body);
+    if (!body.success) return next(body.error);
+    const pool = getPool();
+    if (!pool) return res.status(503).json({ error: "Database is not configured" });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tally-billing-${body.data.billingDate}`]);
+      const run = await client.query(
+        "INSERT INTO billing_runs (billing_date, status) VALUES ($1, 'RUNNING') RETURNING id",
+        [body.data.billingDate]
+      );
+      const subscriptionsDue = await client.query(
+        `SELECT s.id, s.subscription_number, s.customer_id, s.plan_id, s.next_billing_on,
+                p.amount_paise, p.interval
+         FROM subscriptions s JOIN plans p ON p.id = s.plan_id
+         WHERE s.status = 'ACTIVE' AND s.next_billing_on <= $1
+         FOR UPDATE OF s SKIP LOCKED`,
+        [body.data.billingDate]
+      );
+      let invoiced = 0;
+      for (const item of subscriptionsDue.rows as Array<{ id: string; subscription_number: string; customer_id: string; plan_id: string; next_billing_on: string; amount_paise: number; interval: string }>) {
+        const periodStart = item.next_billing_on;
+        const periodEnd = periodStart;
+        const invoice = await client.query(
+          `INSERT INTO invoices
+            (invoice_number, subscription_id, customer_id, service_period_start, service_period_end,
+             status, subtotal_paise, due_on)
+           VALUES ($1, $2, $3, $4, $5, 'CONFIRMED', $6, $4)
+           ON CONFLICT (subscription_id, service_period_start, service_period_end) DO NOTHING
+           RETURNING id`,
+          [`INV-${new Date(body.data.billingDate).getUTCFullYear()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, item.id, item.customer_id, periodStart, periodEnd, item.amount_paise]
+        );
+        if (invoice.rowCount) {
+          await client.query(
+            "INSERT INTO invoice_lines (invoice_id, description, quantity, unit_price_paise) VALUES ($1, $2, 1, $3)",
+            [invoice.rows[0].id, `Subscription ${item.subscription_number}`, item.amount_paise]
+          );
+          await client.query(
+            "INSERT INTO billing_run_items (billing_run_id, subscription_id, outcome, invoice_id) VALUES ($1, $2, 'INVOICED', $3)",
+            [run.rows[0].id, item.id, invoice.rows[0].id]
+          );
+          await client.query(
+            "UPDATE subscriptions SET next_billing_on = CASE interval WHEN 'daily' THEN next_billing_on + 1 WHEN 'weekly' THEN next_billing_on + 7 WHEN 'monthly' THEN (next_billing_on + interval '1 month')::date WHEN 'yearly' THEN (next_billing_on + interval '1 year')::date END FROM plans WHERE plans.id = subscriptions.plan_id AND subscriptions.id = $1",
+            [item.id]
+          );
+          invoiced++;
+        } else {
+          await client.query(
+            "INSERT INTO billing_run_items (billing_run_id, subscription_id, outcome, reason) VALUES ($1, $2, 'SKIPPED', 'Invoice already exists for billing period')",
+            [run.rows[0].id, item.id]
+          );
+        }
+      }
+      await client.query("UPDATE billing_runs SET status = 'COMPLETED', completed_at = now() WHERE id = $1", [run.rows[0].id]);
+      await client.query("COMMIT");
+      return res.status(201).json({ runId: run.rows[0].id, due: subscriptionsDue.rowCount, invoiced });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      return next(error);
+    } finally {
+      client.release();
+    }
+  });
+  app.post("/api/payments", authenticate, requireRole("ADMIN", "STAFF"), async (req, res, next) => {
+    const body = z.object({
+      customerId: z.string().uuid(),
+      invoiceId: z.string().uuid(),
+      amountPaise: z.number().int().positive(),
+      method: z.enum(["cash", "bank_transfer", "upi", "card", "cheque", "other"]),
+      reference: z.string().trim().max(120).optional(),
+      receivedOn: z.string().date(),
+      notes: z.string().max(2000).default("")
+    }).strict().safeParse(req.body);
+    if (!body.success) return next(body.error);
+    const pool = getPool();
+    if (!pool) return res.status(503).json({ error: "Database is not configured" });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const invoice = await client.query("SELECT customer_id, total_paise FROM invoices WHERE id = $1 FOR UPDATE", [body.data.invoiceId]);
+      if (!invoice.rowCount || invoice.rows[0].customer_id !== body.data.customerId) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Invoice not found for customer" });
+      }
+      const payment = await client.query(
+        `INSERT INTO payments (customer_id, amount_paise, method, reference, received_on, notes)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [body.data.customerId, body.data.amountPaise, body.data.method, body.data.reference ?? null, body.data.receivedOn, body.data.notes]
+      );
+      await client.query(
+        "INSERT INTO payment_allocations (payment_id, invoice_id, amount_paise) VALUES ($1, $2, $3)",
+        [payment.rows[0].id, body.data.invoiceId, body.data.amountPaise]
+      );
+      await client.query(
+        `UPDATE invoices SET status = 'PAID'
+         WHERE id = $1 AND total_paise <= (
+           SELECT COALESCE(SUM(amount_paise), 0) FROM payment_allocations WHERE invoice_id = $1
+         )`,
+        [body.data.invoiceId]
+      );
+      await client.query("COMMIT");
+      return res.status(201).json({ id: payment.rows[0].id, invoiceId: body.data.invoiceId, amountPaise: body.data.amountPaise });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      return next(error);
+    } finally {
+      client.release();
+    }
+  });
+  app.get("/api/reports", authenticate, async (req, res, next) => {
+    try {
+      const pool = getPool();
+      if (pool) {
+        const scope = req.user?.role === "CUSTOMER" ? "WHERE c.user_id = $1" : "";
+        const params = req.user?.role === "CUSTOMER" ? [req.user.id] : [];
+        const totals = await pool.query(
+          `SELECT
+             COALESCE(SUM(CASE WHEN s.status = 'ACTIVE' THEN
+               CASE p.interval WHEN 'daily' THEN p.amount_paise * 365 / 12
+               WHEN 'weekly' THEN p.amount_paise * 52 / 12
+               WHEN 'yearly' THEN p.amount_paise / 12
+               ELSE p.amount_paise END ELSE 0 END), 0)::bigint AS mrr,
+             COUNT(*) FILTER (WHERE s.status = 'ACTIVE')::int AS active_subscriptions,
+             COALESCE((SELECT SUM(i.total_paise) FROM invoices i JOIN customers ic ON ic.id = i.customer_id
+               WHERE i.status <> 'PAID' AND ${scope ? "ic.user_id = $1 AND" : ""} i.id IS NOT NULL), 0)::bigint AS outstanding
+           FROM subscriptions s JOIN plans p ON p.id = s.plan_id JOIN customers c ON c.id = s.customer_id ${scope}`,
+          params
+        );
+        const row = totals.rows[0] as { mrr: number; active_subscriptions: number; outstanding: number };
+        return res.json({ mrr: Number(row.mrr), arr: Number(row.mrr) * 12, activeSubscriptions: row.active_subscriptions, outstanding: Number(row.outstanding) });
+      }
+    } catch (error) {
+      return next(error);
+    }
+    const mrr = subscriptions.filter((s) => s.status === "ACTIVE").reduce((sum, s) => sum + monthlyRecurringRevenue(s.amount, s.interval), 0);
+    return res.json({ mrr, arr: mrr * 12, movements: { opening: 5480000, newBusiness: 820000, expansion: 310000, contraction: 90000, reactivation: 0, churn: 180000, closing: 6340000 }, aging: [{ bucket: "0–30 days", amount: 1762820 }, { bucket: "31–60 days", amount: 825882 }, { bucket: "60+ days", amount: 0 }] });
+  });
+  app.get("/api/intelligence/anomalies", authenticate, async (_req, res, next) => {
+    try {
+      const pool = getPool();
+      if (!pool) return res.json([]);
+      const result = await pool.query(
+        `SELECT 'DUPLICATE_PAYMENT_REFERENCE' AS rule, p.reference AS record,
+                'Payment reference appears more than once for the same customer' AS explanation,
+                'MEDIUM' AS severity, 'Review the duplicate bank references' AS action
+         FROM payments p
+         WHERE p.reference IS NOT NULL
+         GROUP BY p.customer_id, p.reference HAVING COUNT(*) > 1
+         UNION ALL
+         SELECT 'LARGE_INVOICE', i.invoice_number,
+                'Invoice is more than three times the average invoice total', 'HIGH',
+                'Confirm pricing and service period before collection'
+         FROM invoices i
+         WHERE i.total_paise > (SELECT COALESCE(AVG(total_paise) * 3, 0) FROM invoices)`,
+      );
+      return res.json(result.rows);
+    } catch (error) {
+      return next(error);
+    }
+  });
+  app.get("/api/intelligence/leakage", authenticate, requireRole("ADMIN", "STAFF"), async (_req, res, next) => {
+    try {
+      const pool = getPool();
+      if (!pool) return res.json({ findings: [], estimatedImpactPaise: 0 });
+      const result = await pool.query(
+        `SELECT s.subscription_number AS subscription, c.legal_name AS customer,
+                s.next_billing_on AS "expectedBillingDate", p.amount_paise AS "estimatedImpactPaise",
+                'ACTIVE subscription has a billing date in the past' AS reason
+         FROM subscriptions s JOIN customers c ON c.id = s.customer_id JOIN plans p ON p.id = s.plan_id
+         WHERE s.status = 'ACTIVE' AND s.next_billing_on < CURRENT_DATE
+           AND NOT EXISTS (
+             SELECT 1 FROM invoices i WHERE i.subscription_id = s.id
+               AND i.service_period_start = s.next_billing_on
+           )
+         ORDER BY p.amount_paise DESC`
+      );
+      return res.json({ findings: result.rows, estimatedImpactPaise: result.rows.reduce((sum: number, row: { estimatedImpactPaise: number }) => sum + Number(row.estimatedImpactPaise), 0) });
+    } catch (error) {
+      return next(error);
+    }
+  });
+  app.post("/api/billing/preview-fixture", (_req, res) => {
     const due = subscriptions.filter((s) => s.status === "ACTIVE" && s.nextBilling <= "2026-11-04");
     res.json({ due: due.map((s) => ({ subscription: s.number, customer: s.customer, amount: calculateInvoiceTotals(s.amount, 0, 0.18).total })), skipped: subscriptions.filter((s) => s.status !== "ACTIVE").map((s) => ({ subscription: s.number, reason: `Subscription is ${s.status.toLowerCase()}` })) });
   });

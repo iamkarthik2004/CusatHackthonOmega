@@ -10,6 +10,15 @@ Tally is a modular-monolith subscription and financial operations workspace for 
 4. Start both applications: `npm run dev`.
 5. Open [http://localhost:5173](http://localhost:5173). The API health check is at [http://localhost:4000/health](http://localhost:4000/health).
 
+Apply the SQL migrations in order with PostgreSQL:
+
+```powershell
+psql "$env:DATABASE_URL" -f apps/api/src/database/001_initial.sql
+psql "$env:DATABASE_URL" -f apps/api/src/database/002_auth.sql
+psql "$env:DATABASE_URL" -f apps/api/src/database/003_financial_operations.sql
+psql "$env:DATABASE_URL" -f apps/api/src/database/seed.sql
+```
+
 The current foundation includes a strict shared financial package, PostgreSQL migrations with financial constraints and billing idempotency keys, Argon2 authentication with HTTP-only sessions, role-protected catalog and subscription endpoints, dashboard/reporting/billing-preview endpoints, and a responsive Tally workspace. Monetary values are represented in paise and normalized MRR uses the daily/weekly/monthly/yearly rules from the product specification.
 
 ## Commands
@@ -18,4 +27,4 @@ The current foundation includes a strict shared financial package, PostgreSQL mi
 - `npm test` — API tests.
 - `npm run build` — production builds.
 
-When `DATABASE_URL` is set, authentication, customers, products, plans, and subscriptions use PostgreSQL. Without it, the dashboard and preview remain available with deterministic local fixtures while protected database operations return an explicit configuration error. Background billing execution, payments, reconciliation, portal workflows, and the remaining financial modules are the next slices behind the same service boundaries. No credentials or external service integrations are included.
+When `DATABASE_URL` is set, authentication, customers, products, plans, subscriptions, invoices, billing runs, payments, allocation integrity, reports, anomaly detection, and leakage detection use PostgreSQL. Without it, the dashboard and fixture preview remain available while protected database operations return an explicit configuration error. The seed script creates 10,000 coherent demo customers, subscriptions, invoices, and payments. No credentials or external service integrations are included.

@@ -6,7 +6,11 @@ import { getPool } from "../../database/client.js";
 
 const credentialsSchema = z.object({
   email: z.string().email().transform((value) => value.trim().toLowerCase()),
-  password: z.string().min(9)
+  password: z.string()
+    .min(9)
+    .regex(/[A-Z]/, "Password must contain an uppercase letter")
+    .regex(/[a-z]/, "Password must contain a lowercase letter")
+    .regex(/[^A-Za-z0-9]/, "Password must contain a special character")
 }).strict();
 const sessionCookie = "tally_session";
 const hashToken = (token: string) => crypto.createHash("sha256").update(token).digest("hex");
