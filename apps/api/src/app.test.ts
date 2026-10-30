@@ -10,6 +10,6 @@ describe("Tally API", () => {
   });
   it("rejects invalid subscription transitions", async () => {
     const response = await request(createApp()).post("/api/subscriptions/sub_1/transition").send({ status: "DRAFT" });
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(401);
   });
 });

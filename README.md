@@ -10,7 +10,7 @@ Tally is a modular-monolith subscription and financial operations workspace for 
 4. Start both applications: `npm run dev`.
 5. Open [http://localhost:5173](http://localhost:5173). The API health check is at [http://localhost:4000/health](http://localhost:4000/health).
 
-The current foundation includes a strict shared financial package, an initial PostgreSQL migration with financial constraints and billing idempotency keys, an Express API with lifecycle validation, dashboard/reporting/billing-preview endpoints, and a responsive Tally workspace. Monetary values are represented in paise and normalized MRR uses the daily/weekly/monthly/yearly rules from the product specification.
+The current foundation includes a strict shared financial package, PostgreSQL migrations with financial constraints and billing idempotency keys, Argon2 authentication with HTTP-only sessions, role-protected catalog and subscription endpoints, dashboard/reporting/billing-preview endpoints, and a responsive Tally workspace. Monetary values are represented in paise and normalized MRR uses the daily/weekly/monthly/yearly rules from the product specification.
 
 ## Commands
 
@@ -18,4 +18,4 @@ The current foundation includes a strict shared financial package, an initial Po
 - `npm test` — API tests.
 - `npm run build` — production builds.
 
-The API currently uses a small deterministic fixture set for the dashboard while the migration establishes the production persistence model. Authentication, repository-backed CRUD, background billing execution, and the remaining financial modules should be wired behind the same repository/service boundaries before production deployment. No credentials or external service integrations are included.
+When `DATABASE_URL` is set, authentication, customers, products, plans, and subscriptions use PostgreSQL. Without it, the dashboard and preview remain available with deterministic local fixtures while protected database operations return an explicit configuration error. Background billing execution, payments, reconciliation, portal workflows, and the remaining financial modules are the next slices behind the same service boundaries. No credentials or external service integrations are included.
