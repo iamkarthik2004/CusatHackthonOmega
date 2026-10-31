@@ -1,0 +1,34 @@
+import { useEffect, useState } from "react";
+import { Activity, ArrowUpRight, BarChart3, Bell, BookOpen, CheckCircle2, ChevronRight, CircleDollarSign, CreditCard, FileText, LayoutDashboard, Menu, Plus, Receipt, Settings, ShieldCheck, Sparkles, Users, X } from "lucide-react";
+import { formatMoney } from "@tally/shared";
+import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+
+const api = "http://localhost:4000";
+type Dashboard = { metrics: { mrr: number; activeSubscriptions: number; outstanding: number; collected: number }; trend: { month: string; value: number }[]; attention: { label: string; tone: string }[] };
+
+export function App() {
+  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [active, setActive] = useState("Overview");
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => { fetch(`${api}/api/dashboard`).then((r) => r.json()).then(setDashboard).catch(() => undefined); }, []);
+  const nav = [{ label: "Overview", icon: LayoutDashboard }, { label: "Customers", icon: Users }, { label: "Subscriptions", icon: Receipt }, { label: "Invoices", icon: FileText }, { label: "Payments", icon: CreditCard }, { label: "Reports", icon: BarChart3 }, { label: "Integrity Lab", icon: ShieldCheck }];
+  return <div className="app">
+    <aside className={mobile ? "sidebar open" : "sidebar"}><div className="brand"><div className="brand-mark">T</div><div><strong>Tally</strong><span>by Brightloop</span></div><button className="close" onClick={() => setMobile(false)}><X size={18}/></button></div><div className="workspace"><span className="workspace-dot"/> Brightloop Software <ChevronRight size={14}/></div><nav>{nav.map(({ label, icon: Icon }) => <button key={label} className={active === label ? "nav-item active" : "nav-item"} onClick={() => { setActive(label); setMobile(false); }}><Icon size={18}/>{label}{label === "Invoices" && <span className="nav-count">2</span>}</button>)}</nav><div className="sidebar-bottom"><button className="nav-item"><Settings size={18}/>Settings</button><div className="profile"><div className="avatar">AM</div><div><strong>Arjun Menon</strong><span>Administrator</span></div><ChevronRight size={15}/></div></div></aside>
+    <main className="main"><header><button className="mobile-menu" onClick={() => setMobile(true)}><Menu/></button><div><p className="eyebrow">Friday, 31 October 2026</p><h1>{active}</h1></div><div className="header-actions"><button className="icon-btn"><Bell size={18}/><i/></button><button className="primary"><Plus size={16}/> Create</button></div></header>{active === "Overview" ? <Overview dashboard={dashboard}/> : <EmptyState title={active}/>}</main>
+  </div>;
+}
+
+function Overview({ dashboard }: { dashboard: Dashboard | null }) {
+  const metrics = dashboard?.metrics;
+  return <div className="content"><section className="hero"><div><span className="hero-kicker"><Sparkles size={14}/> Financial command center</span><h2>The books prove themselves.</h2><p>Clear signals for your subscription business, grounded in every record.</p></div><button className="secondary">Run billing preview <ArrowUpRight size={15}/></button></section>
+    <section className="metrics">{[
+      ["Monthly recurring revenue", metrics ? formatMoney(metrics.mrr) : "—", "+8.4% this month", CircleDollarSign],
+      ["Active subscriptions", metrics?.activeSubscriptions.toString() ?? "—", "+3 since last month", Activity],
+      ["Outstanding invoices", metrics ? formatMoney(metrics.outstanding) : "—", "2 need attention", FileText],
+      ["Collected this month", metrics ? formatMoney(metrics.collected) : "—", "92.4% collection rate", CreditCard]
+    ].map(([label, value, note, Icon]) => <div className="metric" key={label as string}><div className="metric-top"><span>{label as string}</span><Icon size={17}/></div><strong>{value as string}</strong><small className={(note as string).includes("attention") ? "warning" : ""}>{note as string}</small></div>)}</section>
+    <section className="grid-two"><div className="card chart-card"><div className="card-heading"><div><span className="label">Revenue trend</span><h3>MRR movement</h3></div><button className="period">Last 12 months <ChevronRight size={14}/></button></div><div className="chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={dashboard?.trend ?? []}><defs><linearGradient id="red" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#d71920" stopOpacity=".22"/><stop offset="100%" stopColor="#d71920" stopOpacity="0"/></linearGradient></defs><XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: "#85888d", fontSize: 11 }}/><YAxis hide/><Tooltip contentStyle={{ border: "1px solid #e8e9eb", borderRadius: 8 }} formatter={(value) => [`₹${value}L`, "MRR"]}/><Area type="monotone" dataKey="value" stroke="#d71920" strokeWidth={2.5} fill="url(#red)" /></AreaChart></ResponsiveContainer></div></div><div className="card"><div className="card-heading"><div><span className="label">Action queue</span><h3>Needs your attention</h3></div><button className="more">View all</button></div><div className="attention">{(dashboard?.attention ?? []).map((item) => <div className="attention-row" key={item.label}><span className={`attention-icon ${item.tone}`}><Bell size={15}/></span><span>{item.label}</span><ChevronRight size={15}/></div>)}</div><div className="integrity"><CheckCircle2 size={17}/><div><strong>Integrity: 3/3 hold</strong><span>All financial invariants are balanced</span></div><ArrowUpRight size={15}/></div></div></section>
+    <section className="grid-two lower"><div className="card"><div className="card-heading"><div><span className="label">Upcoming</span><h3>Renewals</h3></div><button className="more">See calendar</button></div>{[["Northstar Labs","Scale plan","12 Nov 2026","₹14,990"],["Orbit Works","Growth plan","04 Nov 2026","₹6,999"],["Atlas Retail","Starter plan","08 Jan 2027","₹48,000"]].map((row) => <div className="list-row" key={row[0]}><div className="company-avatar">{row[0][0]}</div><div className="row-main"><strong>{row[0]}</strong><span>{row[1]}</span></div><div className="row-date"><strong>{row[3]}</strong><span>{row[2]}</span></div></div>)}</div><div className="card quote-card"><BookOpen size={22}/><h3>Make every number explainable</h3><p>Trace revenue from your dashboard to the subscription, invoice, and payment that created it.</p><button className="text-button">Explore the audit trail <ArrowUpRight size={15}/></button></div></section>
+  </div>;
+}
+function EmptyState({ title }: { title: string }) { return <div className="empty"><div className="empty-icon"><Sparkles size={22}/></div><h2>{title} is ready for your data</h2><p>Connect PostgreSQL and use the API endpoints to manage this workspace.</p><button className="primary"><Plus size={16}/> Create first record</button></div>; }
