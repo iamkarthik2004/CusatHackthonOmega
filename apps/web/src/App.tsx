@@ -1,34 +1,850 @@
+
 import { useEffect, useState } from "react";
-import { Activity, ArrowUpRight, BarChart3, Bell, BookOpen, CheckCircle2, ChevronRight, CircleDollarSign, CreditCard, FileText, LayoutDashboard, Menu, Plus, Receipt, Settings, ShieldCheck, Sparkles, Users, X } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import {
+  Activity,
+  ArrowUpRight,
+  BarChart3,
+  Bell,
+  CheckCircle2,
+  ChevronRight,
+  CircleDollarSign,
+  CreditCard,
+  FileText,
+  LayoutDashboard,
+  Menu,
+  Plus,
+  Receipt,
+  Settings,
+  ShieldCheck,
+  Users,
+  X,
+} from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+
 import { formatMoney } from "@tally/shared";
-import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import "./App.css";
 
-const api = "http://localhost:4000";
-type Dashboard = { metrics: { mrr: number; activeSubscriptions: number; outstanding: number; collected: number }; trend: { month: string; value: number }[]; attention: { label: string; tone: string }[] };
+// --------------------------------------------------
+// API CONFIGURATION
+// --------------------------------------------------
 
-export function App() {
-  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
-  const [active, setActive] = useState("Overview");
-  const [mobile, setMobile] = useState(false);
-  useEffect(() => { fetch(`${api}/api/dashboard`).then((r) => r.json()).then(setDashboard).catch(() => undefined); }, []);
-  const nav = [{ label: "Overview", icon: LayoutDashboard }, { label: "Customers", icon: Users }, { label: "Subscriptions", icon: Receipt }, { label: "Invoices", icon: FileText }, { label: "Payments", icon: CreditCard }, { label: "Reports", icon: BarChart3 }, { label: "Integrity Lab", icon: ShieldCheck }];
-  return <div className="app">
-    <aside className={mobile ? "sidebar open" : "sidebar"}><div className="brand"><div className="brand-mark">T</div><div><strong>Tally</strong><span>by Brightloop</span></div><button className="close" onClick={() => setMobile(false)}><X size={18}/></button></div><div className="workspace"><span className="workspace-dot"/> Brightloop Software <ChevronRight size={14}/></div><nav>{nav.map(({ label, icon: Icon }) => <button key={label} className={active === label ? "nav-item active" : "nav-item"} onClick={() => { setActive(label); setMobile(false); }}><Icon size={18}/>{label}{label === "Invoices" && <span className="nav-count">2</span>}</button>)}</nav><div className="sidebar-bottom"><button className="nav-item"><Settings size={18}/>Settings</button><div className="profile"><div className="avatar">AM</div><div><strong>Arjun Menon</strong><span>Administrator</span></div><ChevronRight size={15}/></div></div></aside>
-    <main className="main"><header><button className="mobile-menu" onClick={() => setMobile(true)}><Menu/></button><div><p className="eyebrow">Friday, 31 October 2026</p><h1>{active}</h1></div><div className="header-actions"><button className="icon-btn"><Bell size={18}/><i/></button><button className="primary"><Plus size={16}/> Create</button></div></header>{active === "Overview" ? <Overview dashboard={dashboard}/> : <EmptyState title={active}/>}</main>
-  </div>;
+const API_URL = (
+  import.meta.env.VITE_API_URL ?? "http://localhost:4000"
+).replace(/\/$/, "");
+
+// --------------------------------------------------
+// TYPES
+// --------------------------------------------------
+
+type DashboardMetrics = {
+  mrr: number;
+  activeSubscriptions: number;
+  outstanding: number;
+  collected: number;
+};
+
+type TrendItem = {
+  month: string;
+  value: number;
+};
+
+type AttentionItem = {
+  label: string;
+  tone: "warning" | "danger" | "info";
+};
+
+type DashboardData = {
+  metrics: DashboardMetrics;
+  trend: TrendItem[];
+  attention: AttentionItem[];
+};
+
+type NavigationItem = {
+  label: string;
+  icon: LucideIcon;
+};
+
+// --------------------------------------------------
+// CONSTANTS
+// --------------------------------------------------
+
+const NAVIGATION: NavigationItem[] = [
+  { label: "Overview", icon: LayoutDashboard },
+  { label: "Customers", icon: Users },
+  { label: "Subscriptions", icon: Receipt },
+  { label: "Invoices", icon: FileText },
+  { label: "Payments", icon: CreditCard },
+  { label: "Reports", icon: BarChart3 },
+  { label: "Integrity Lab", icon: ShieldCheck },
+];
+
+const METRIC_CONFIG: {
+  key: keyof DashboardMetrics;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+  format: "money" | "number";
+}[] = [
+  {
+    key: "mrr",
+    label: "Monthly recurring revenue",
+    description: "Current monthly recurring revenue",
+    icon: CircleDollarSign,
+    format: "money",
+  },
+  {
+    key: "activeSubscriptions",
+    label: "Active subscriptions",
+    description: "Currently active subscriptions",
+    icon: Activity,
+    format: "number",
+  },
+  {
+    key: "outstanding",
+    label: "Outstanding invoices",
+    description: "Amount awaiting payment",
+    icon: FileText,
+    format: "money",
+  },
+  {
+    key: "collected",
+    label: "Collected this month",
+    description: "Payments successfully recorded",
+    icon: CreditCard,
+    format: "money",
+  },
+];
+
+// --------------------------------------------------
+// HELPERS
+// --------------------------------------------------
+
+function getCurrentDate(): string {
+  return new Intl.DateTimeFormat("en-IN", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
 }
 
-function Overview({ dashboard }: { dashboard: Dashboard | null }) {
-  const metrics = dashboard?.metrics;
-  return <div className="content"><section className="hero"><div><span className="hero-kicker"><Sparkles size={14}/> Financial command center</span><h2>The books prove themselves.</h2><p>Clear signals for your subscription business, grounded in every record.</p></div><button className="secondary">Run billing preview <ArrowUpRight size={15}/></button></section>
-    <section className="metrics">{[
-      ["Monthly recurring revenue", metrics ? formatMoney(metrics.mrr) : "—", "+8.4% this month", CircleDollarSign],
-      ["Active subscriptions", metrics?.activeSubscriptions.toString() ?? "—", "+3 since last month", Activity],
-      ["Outstanding invoices", metrics ? formatMoney(metrics.outstanding) : "—", "2 need attention", FileText],
-      ["Collected this month", metrics ? formatMoney(metrics.collected) : "—", "92.4% collection rate", CreditCard]
-    ].map(([label, value, note, Icon]) => <div className="metric" key={label as string}><div className="metric-top"><span>{label as string}</span><Icon size={17}/></div><strong>{value as string}</strong><small className={(note as string).includes("attention") ? "warning" : ""}>{note as string}</small></div>)}</section>
-    <section className="grid-two"><div className="card chart-card"><div className="card-heading"><div><span className="label">Revenue trend</span><h3>MRR movement</h3></div><button className="period">Last 12 months <ChevronRight size={14}/></button></div><div className="chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={dashboard?.trend ?? []}><defs><linearGradient id="red" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#d71920" stopOpacity=".22"/><stop offset="100%" stopColor="#d71920" stopOpacity="0"/></linearGradient></defs><XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: "#85888d", fontSize: 11 }}/><YAxis hide/><Tooltip contentStyle={{ border: "1px solid #e8e9eb", borderRadius: 8 }} formatter={(value) => [`₹${value}L`, "MRR"]}/><Area type="monotone" dataKey="value" stroke="#d71920" strokeWidth={2.5} fill="url(#red)" /></AreaChart></ResponsiveContainer></div></div><div className="card"><div className="card-heading"><div><span className="label">Action queue</span><h3>Needs your attention</h3></div><button className="more">View all</button></div><div className="attention">{(dashboard?.attention ?? []).map((item) => <div className="attention-row" key={item.label}><span className={`attention-icon ${item.tone}`}><Bell size={15}/></span><span>{item.label}</span><ChevronRight size={15}/></div>)}</div><div className="integrity"><CheckCircle2 size={17}/><div><strong>Integrity: 3/3 hold</strong><span>All financial invariants are balanced</span></div><ArrowUpRight size={15}/></div></div></section>
-    <section className="grid-two lower"><div className="card"><div className="card-heading"><div><span className="label">Upcoming</span><h3>Renewals</h3></div><button className="more">See calendar</button></div>{[["Northstar Labs","Scale plan","12 Nov 2026","₹14,990"],["Orbit Works","Growth plan","04 Nov 2026","₹6,999"],["Atlas Retail","Starter plan","08 Jan 2027","₹48,000"]].map((row) => <div className="list-row" key={row[0]}><div className="company-avatar">{row[0][0]}</div><div className="row-main"><strong>{row[0]}</strong><span>{row[1]}</span></div><div className="row-date"><strong>{row[3]}</strong><span>{row[2]}</span></div></div>)}</div><div className="card quote-card"><BookOpen size={22}/><h3>Make every number explainable</h3><p>Trace revenue from your dashboard to the subscription, invoice, and payment that created it.</p><button className="text-button">Explore the audit trail <ArrowUpRight size={15}/></button></div></section>
-  </div>;
+function formatMetric(
+  value: number,
+  format: "money" | "number"
+): string {
+  if (format === "money") {
+    return formatMoney(value);
+  }
+
+  return value.toLocaleString("en-IN");
 }
-function EmptyState({ title }: { title: string }) { return <div className="empty"><div className="empty-icon"><Sparkles size={22}/></div><h2>{title} is ready for your data</h2><p>Connect PostgreSQL and use the API endpoints to manage this workspace.</p><button className="primary"><Plus size={16}/> Create first record</button></div>; }
+
+function isValidDashboardData(
+  value: unknown
+): value is DashboardData {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const data = value as Record<string, unknown>;
+  const metrics = data.metrics;
+
+  if (!metrics || typeof metrics !== "object") {
+    return false;
+  }
+
+  const metricValues = metrics as Record<string, unknown>;
+
+  const requiredMetrics: (keyof DashboardMetrics)[] = [
+    "mrr",
+    "activeSubscriptions",
+    "outstanding",
+    "collected",
+  ];
+
+  const validMetrics = requiredMetrics.every((key) => {
+    const metric = metricValues[key];
+
+    return (
+      typeof metric === "number" &&
+      Number.isFinite(metric)
+    );
+  });
+
+  const validTrend =
+    Array.isArray(data.trend) &&
+    data.trend.every(
+      (item: unknown) =>
+        !!item &&
+        typeof item === "object" &&
+        typeof (item as TrendItem).month === "string" &&
+        typeof (item as TrendItem).value === "number" &&
+        Number.isFinite((item as TrendItem).value)
+    );
+
+  const validAttention =
+    Array.isArray(data.attention) &&
+    data.attention.every(
+      (item: unknown) =>
+        !!item &&
+        typeof item === "object" &&
+        typeof (item as AttentionItem).label === "string" &&
+        ["warning", "danger", "info"].includes(
+          (item as AttentionItem).tone
+        )
+    );
+
+  return validMetrics && validTrend && validAttention;
+}
+
+async function getDashboardData(
+  signal: AbortSignal
+): Promise<DashboardData> {
+  const response = await fetch(`${API_URL}/api/dashboard`, {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+    },
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Dashboard request failed. Server returned ${response.status}.`
+    );
+  }
+
+  const result: unknown = await response.json();
+
+  if (!isValidDashboardData(result)) {
+    throw new Error(
+      "The dashboard API returned data in an unexpected format."
+    );
+  }
+
+  return result;
+}
+
+// --------------------------------------------------
+// MAIN APP
+// --------------------------------------------------
+
+export default function App() {
+  const [activePage, setActivePage] = useState("Overview");
+  const [dashboard, setDashboard] = useState<DashboardData | null>(
+    null
+  );
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadDashboard() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const result = await getDashboardData(controller.signal);
+
+        if (!controller.signal.aborted) {
+          setDashboard(result);
+        }
+      } catch (err) {
+        if (controller.signal.aborted) return;
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load dashboard."
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadDashboard();
+
+    return () => controller.abort();
+  }, [refreshKey]);
+
+  function navigate(page: string) {
+    setActivePage(page);
+    setMobileMenuOpen(false);
+    setCreateMenuOpen(false);
+  }
+
+  return (
+    <div className="app-shell">
+      <Sidebar
+        activePage={activePage}
+        mobileMenuOpen={mobileMenuOpen}
+        onNavigate={navigate}
+        onClose={() => setMobileMenuOpen(false)}
+      />
+
+      <main className="main-content">
+        <Header
+          title={activePage}
+          onMenuClick={() => setMobileMenuOpen(true)}
+          createMenuOpen={createMenuOpen}
+          onCreateClick={() =>
+            setCreateMenuOpen((current) => !current)
+          }
+          onCreateAction={navigate}
+        />
+
+        {activePage === "Overview" ? (
+          <Dashboard
+            data={dashboard}
+            loading={loading}
+            error={error}
+            onRetry={() => setRefreshKey((key) => key + 1)}
+          />
+        ) : (
+          <PlaceholderPage
+            title={activePage}
+            onBack={() => navigate("Overview")}
+          />
+        )}
+      </main>
+    </div>
+  );
+}
+
+// --------------------------------------------------
+// SIDEBAR
+// --------------------------------------------------
+
+type SidebarProps = {
+  activePage: string;
+  mobileMenuOpen: boolean;
+  onNavigate: (page: string) => void;
+  onClose: () => void;
+};
+
+function Sidebar({
+  activePage,
+  mobileMenuOpen,
+  onNavigate,
+  onClose,
+}: SidebarProps) {
+  return (
+    <>
+      {mobileMenuOpen && (
+        <button
+          className="sidebar-backdrop"
+          aria-label="Close navigation"
+          onClick={onClose}
+        />
+      )}
+
+      <aside
+        className={`sidebar ${
+          mobileMenuOpen ? "sidebar-open" : ""
+        }`}
+      >
+        <div className="brand">
+          <div className="brand-logo">T.</div>
+
+          <div className="brand-text">
+            <strong>Tally</strong>
+            <span>by Brightloop</span>
+          </div>
+
+          <button
+            className="sidebar-close"
+            onClick={onClose}
+            aria-label="Close sidebar"
+          >
+            <X size={19} />
+          </button>
+        </div>
+
+        <button className="workspace-switcher">
+          <span className="workspace-indicator" />
+          <span>Brightloop Software</span>
+          <ChevronRight size={15} />
+        </button>
+
+        <nav className="navigation">
+          <p className="navigation-heading">WORKSPACE</p>
+
+          {NAVIGATION.map(({ label, icon: Icon }) => {
+            const isActive = activePage === label;
+
+            return (
+              <button
+                key={label}
+                className={`navigation-item ${
+                  isActive ? "navigation-active" : ""
+                }`}
+                onClick={() => onNavigate(label)}
+                aria-current={isActive ? "page" : undefined}
+              >
+                <Icon size={18} strokeWidth={1.8} />
+                <span>{label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="sidebar-footer">
+          <button
+            className={`navigation-item ${
+              activePage === "Settings" ? "navigation-active" : ""
+            }`}
+            onClick={() => onNavigate("Settings")}
+          >
+            <Settings size={18} />
+            <span>Settings</span>
+          </button>
+
+          <div className="profile">
+            <div className="profile-avatar">AM</div>
+
+            <div className="profile-details">
+              <strong>Arjun Menon</strong>
+              <span>Administrator</span>
+            </div>
+
+            <ChevronRight size={15} />
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// --------------------------------------------------
+// HEADER
+// --------------------------------------------------
+
+type HeaderProps = {
+  title: string;
+  onMenuClick: () => void;
+  createMenuOpen: boolean;
+  onCreateClick: () => void;
+  onCreateAction: (page: string) => void;
+};
+
+function Header({
+  title,
+  onMenuClick,
+  createMenuOpen,
+  onCreateClick,
+  onCreateAction,
+}: HeaderProps) {
+  return (
+    <header className="topbar">
+      <button
+        className="mobile-menu-button"
+        onClick={onMenuClick}
+        aria-label="Open navigation"
+      >
+        <Menu size={21} />
+      </button>
+
+      <div className="page-heading">
+        <p>{getCurrentDate()}</p>
+        <h1>{title}</h1>
+      </div>
+
+      <div className="topbar-actions">
+        <button
+          className="icon-button"
+          aria-label="Notifications"
+          title="Notifications"
+        >
+          <Bell size={18} />
+        </button>
+
+        <div className="create-wrapper">
+          <button
+            className="create-button"
+            onClick={onCreateClick}
+            aria-expanded={createMenuOpen}
+          >
+            <Plus size={17} />
+            <span>Create</span>
+          </button>
+
+          {createMenuOpen && (
+            <div className="create-menu">
+              <p>Create new</p>
+
+              {[
+                ["Customer", "Customers"],
+                ["Subscription", "Subscriptions"],
+                ["Invoice", "Invoices"],
+                ["Payment", "Payments"],
+              ].map(([label, page]) => (
+                <button
+                  key={page}
+                  onClick={() => onCreateAction(page)}
+                >
+                  <Plus size={14} />
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+// --------------------------------------------------
+// DASHBOARD
+// --------------------------------------------------
+
+type DashboardProps = {
+  data: DashboardData | null;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+};
+
+function Dashboard({
+  data,
+  loading,
+  error,
+  onRetry,
+}: DashboardProps) {
+  if (loading && !data) {
+    return (
+      <section className="content-area">
+        <div className="state-card">
+          <div className="loading-spinner" />
+          <h2>Preparing your workspace</h2>
+          <p>Loading your financial information...</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <section className="content-area">
+        <div className="state-card">
+          <div className="state-icon state-error">
+            <Activity size={22} />
+          </div>
+
+          <h2>Unable to load your dashboard</h2>
+          <p>{error}</p>
+
+          <button className="create-button" onClick={onRetry}>
+            Try again
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  if (!data) return null;
+
+  return (
+    <section className="content-area">
+      <div className="welcome-banner">
+        <div>
+          <span className="welcome-eyebrow">
+            <Activity size={14} />
+            YOUR BUSINESS AT A GLANCE
+          </span>
+
+          <h2>The books prove themselves.</h2>
+
+          <p>
+            Clear financial insights, grounded in every record.
+          </p>
+        </div>
+
+        <button
+          className="banner-button"
+          onClick={() => {
+            document
+              .getElementById("revenue-section")
+              ?.scrollIntoView({ behavior: "smooth" });
+          }}
+        >
+          View financial overview
+          <ArrowUpRight size={16} />
+        </button>
+      </div>
+
+      {error && (
+        <div className="inline-error">
+          Unable to refresh the dashboard. Displaying previously
+          loaded information.
+          <button onClick={onRetry}>Retry</button>
+        </div>
+      )}
+
+      <div className="metrics-grid">
+        {METRIC_CONFIG.map((metric) => (
+          <MetricCard
+            key={metric.key}
+            label={metric.label}
+            value={formatMetric(
+              data.metrics[metric.key],
+              metric.format
+            )}
+            description={metric.description}
+            icon={metric.icon}
+          />
+        ))}
+      </div>
+
+      <div className="dashboard-grid">
+        <RevenueChart data={data.trend} />
+
+        <div className="panel attention-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="panel-eyebrow">ACTION QUEUE</span>
+              <h3>Needs your attention</h3>
+            </div>
+          </div>
+
+          <AttentionQueue items={data.attention} />
+        </div>
+      </div>
+
+      <div className="bottom-note">
+        <div className="bottom-note-icon">
+          <ShieldCheck size={19} />
+        </div>
+
+        <div>
+          <strong>Financial clarity starts with reliable records.</strong>
+          <p>
+            Review invoices, payments and subscription activity to
+            keep your books accurate.
+          </p>
+        </div>
+
+        <ArrowUpRight size={17} />
+      </div>
+    </section>
+  );
+}
+
+// --------------------------------------------------
+// METRIC CARD
+// --------------------------------------------------
+
+type MetricCardProps = {
+  label: string;
+  value: string;
+  description: string;
+  icon: LucideIcon;
+};
+
+function MetricCard({
+  label,
+  value,
+  description,
+  icon: Icon,
+}: MetricCardProps) {
+  return (
+    <article className="metric-card">
+      <div className="metric-heading">
+        <span>{label}</span>
+        <Icon size={18} strokeWidth={1.7} />
+      </div>
+
+      <strong className="metric-value">{value}</strong>
+      <span className="metric-description">{description}</span>
+    </article>
+  );
+}
+
+// --------------------------------------------------
+// REVENUE CHART
+// --------------------------------------------------
+
+function RevenueChart({ data }: { data: TrendItem[] }) {
+  return (
+    <section className="panel revenue-panel" id="revenue-section">
+      <div className="panel-heading">
+        <div>
+          <span className="panel-eyebrow">FINANCIAL OVERVIEW</span>
+          <h3>Revenue trend</h3>
+        </div>
+
+        <span className="chart-period">Monthly</span>
+      </div>
+
+      {data.length > 0 ? (
+        <div className="chart-container">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart
+              data={data}
+              margin={{
+                top: 12,
+                right: 12,
+                left: 0,
+                bottom: 0,
+              }}
+            >
+              <defs>
+                <linearGradient
+                  id="revenueFill"
+                  x1="0"
+                  y1="0"
+                  x2="0"
+                  y2="1"
+                >
+                  <stop
+                    offset="0%"
+                    stopColor="#D71920"
+                    stopOpacity={0.17}
+                  />
+                  <stop
+                    offset="100%"
+                    stopColor="#D71920"
+                    stopOpacity={0}
+                  />
+                </linearGradient>
+              </defs>
+
+              <CartesianGrid
+                vertical={false}
+                stroke="#E8E9EB"
+                strokeDasharray="3 3"
+              />
+
+              <XAxis
+                dataKey="month"
+                axisLine={false}
+                tickLine={false}
+                tick={{
+                  fill: "#85888D",
+                  fontSize: 11,
+                }}
+                tickMargin={12}
+              />
+
+              <YAxis hide />
+
+              <Tooltip
+                contentStyle={{
+                  border: "1px solid #E8E9EB",
+                  borderRadius: "8px",
+                  fontSize: "12px",
+                }}
+                formatter={(value) => [
+                  formatMoney(Number(value ?? 0)),
+                  "Revenue",
+                ]}
+              />
+
+              <Area
+                type="monotone"
+                dataKey="value"
+                stroke="#D71920"
+                strokeWidth={2.2}
+                fill="url(#revenueFill)"
+                activeDot={{
+                  r: 5,
+                  strokeWidth: 0,
+                }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      ) : (
+        <div className="chart-empty">
+          <BarChart3 size={25} />
+          <p>Revenue history will appear here when data is available.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// --------------------------------------------------
+// ATTENTION QUEUE
+// --------------------------------------------------
+
+function AttentionQueue({
+  items,
+}: {
+  items: AttentionItem[];
+}) {
+  if (items.length === 0) {
+    return (
+      <div className="attention-empty">
+        <CheckCircle2 size={22} />
+        <p>Nothing requires your attention right now.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="attention-list">
+      {items.map((item, index) => (
+        <div className="attention-item" key={`${item.label}-${index}`}>
+          <div className={`attention-indicator ${item.tone}`}>
+            <Bell size={15} />
+          </div>
+
+          <span>{item.label}</span>
+
+          <ChevronRight size={15} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// --------------------------------------------------
+// PLACEHOLDER PAGE
+// --------------------------------------------------
+
+function PlaceholderPage({
+  title,
+  onBack,
+}: {
+  title: string;
+  onBack: () => void;
+}) {
+  return (
+    <section className="content-area">
+      <div className="state-card">
+        <div className="state-icon">
+          <LayoutDashboard size={22} />
+        </div>
+
+        <h2>{title}</h2>
+
+        <p>
+          This section is not implemented yet. Its functionality
+          will be added as the application develops.
+        </p>
+
+        <button className="create-button" onClick={onBack}>
+          Back to overview
+        </button>
+      </div>
+    </section>
+  );
+}
