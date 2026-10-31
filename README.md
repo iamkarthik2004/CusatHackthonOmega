@@ -10,7 +10,21 @@ Tally is a modular-monolith subscription and financial operations workspace for 
 4. Start both applications: `npm run dev`.
 5. Open [http://localhost:5173](http://localhost:5173). The API health check is at [http://localhost:4000/health](http://localhost:4000/health).
 
-The current foundation includes a strict shared financial package, an initial PostgreSQL migration with financial constraints and billing idempotency keys, an Express API with lifecycle validation, dashboard/reporting/billing-preview endpoints, and a responsive Tally workspace. Monetary values are represented in paise and normalized MRR uses the daily/weekly/monthly/yearly rules from the product specification.
+Apply the SQL migrations in order with PostgreSQL:
+
+```powershell
+psql "$env:DATABASE_URL" -f apps/api/src/database/001_initial.sql
+psql "$env:DATABASE_URL" -f apps/api/src/database/002_auth.sql
+psql "$env:DATABASE_URL" -f apps/api/src/database/003_financial_operations.sql
+psql "$env:DATABASE_URL" -f apps/api/src/database/004_quotations.sql
+psql "$env:DATABASE_URL" -f apps/api/src/database/005_tax_discount_lifecycle.sql
+psql "$env:DATABASE_URL" -f apps/api/src/database/006_automation_reconciliation.sql
+psql "$env:DATABASE_URL" -f apps/api/src/database/seed.sql
+```
+
+The current foundation includes a strict shared financial package, PostgreSQL migrations with financial constraints and billing idempotency keys, Argon2 authentication with HTTP-only sessions, role-protected catalog and subscription endpoints, dashboard/reporting/billing-preview endpoints, and a responsive Tally workspace. Monetary values are represented in paise and normalized MRR uses the daily/weekly/monthly/yearly rules from the product specification.
+
+Customer accounts use a separate portal surface. They can browse available plans, request subscriptions, review and accept their own quotations, inspect personal GST totals, run personal integrity checks, and preview subscription-change proration. Business-wide billing execution, reports, reconciliation, staff management, audit logs, Integrity Lab runs, and simulated-clock controls remain restricted to administrators and staff.
 
 ## Commands
 
@@ -18,4 +32,4 @@ The current foundation includes a strict shared financial package, an initial Po
 - `npm test` — API tests.
 - `npm run build` — production builds.
 
-The API currently uses a small deterministic fixture set for the dashboard while the migration establishes the production persistence model. Authentication, repository-backed CRUD, background billing execution, and the remaining financial modules should be wired behind the same repository/service boundaries before production deployment. No credentials or external service integrations are included.
+When `DATABASE_URL` is set, authentication, customers, products, plans, quotations, subscriptions, GST/tax rules, discounts, invoices, PDF downloads, billing runs, payment allocation integrity, lifecycle events, reports, anomaly detection, leakage detection, reconciliation previews, integrity runs, and the simulated clock use PostgreSQL. Without it, the dashboard and fixture preview remain available while protected database operations return an explicit configuration error. The seed script creates 10,000 coherent demo customers, subscriptions, invoices, and payments. No credentials or external service integrations are included.
