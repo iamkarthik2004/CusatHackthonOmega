@@ -39,6 +39,18 @@ export async function register(email: string, password: string) {
   } finally {
     client.release();
   }
+
+}
+
+export async function createStaffAccount(email: string, password: string, role: "STAFF" | "ADMIN" = "STAFF") {
+  const pool = getPool();
+  if (!pool) throw new Error("Database is not configured");
+  const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+  const result = await pool.query(
+    "INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3) RETURNING id, email, role, disabled_at AS \"disabledAt\", created_at AS \"createdAt\"",
+    [email, passwordHash, role]
+  );
+  return result.rows[0];
 }
 
 export async function login(email: string, password: string, response: Response) {

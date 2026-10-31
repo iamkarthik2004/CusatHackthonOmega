@@ -51,7 +51,7 @@ INSERT INTO payments (customer_id, amount_paise, method, reference, received_on,
 SELECT i.customer_id, i.total_paise, 'bank_transfer', 'SEED-PAY-' || i.invoice_number, '2026-10-15', 'Seeded demo payment'
 FROM invoices i
 WHERE i.invoice_number LIKE 'SEED-INV-%'
-ON CONFLICT (customer_id, reference) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO payment_allocations (payment_id, invoice_id, amount_paise)
 SELECT p.id, i.id, i.total_paise
