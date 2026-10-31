@@ -1,0 +1,41 @@
+# Tally by Brightloop — Project Dependencies & Environment Requirements
+# Project Architecture: Node.js (v20+) & TypeScript Monorepo
+# Workspaces: packages/shared, apps/api, apps/web
+
+# Root / Tooling
+node>=20.0.0
+npm>=10.0.0
+typescript==5.7.2
+concurrently==9.1.2
+@types/node==22.10.2
+
+# packages/shared
+zod==3.24.1
+
+# apps/api (Backend API & Services)
+express==4.21.2
+cors==2.8.5
+helmet==8.0.0
+cookie-parser==1.4.7
+argon2==0.41.1
+pino==9.6.0
+supertest==7.0.0
+tsx==4.19.2
+vitest==2.1.8
+@types/express==5.0.0
+@types/cors==2.8.17
+@types/cookie-parser==1.4.8
+@types/supertest==6.0.2
+
+# apps/web (Frontend React Dashboard)
+react==18.3.1
+react-dom==18.3.1
+lucide-react==0.468.0
+recharts==2.15.0
+vite==6.0.5
+@vitejs/plugin-react==4.3.4
+@types/react==18.3.18
+@types/react-dom==18.3.5
+
+# Database Engine
+postgresql>=16.0
